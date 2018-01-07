@@ -41,9 +41,11 @@ def requires_lock(func):
 
 
 class TRADE_TYPE:
-	BUY_STOP_MARKET = 'BUY_STOP_MARKET'
-	SELL_STOP_MARKET = 'SELL_STOP_MARKET'
-	ALERT = 'ALERT'
+	BUY_BELOW_AT_MARKET = 'BUY_BELOW_AT_MARKET'
+	SELL_ABOVE_AT_MARKET = 'SELL_ABOVE_AT_MARKET'
+	SELL_BELOW_AT_MARKET = 'SELL_BELOW_AT_MARKET'
+	ALERT_ABOVE = 'ALERT_ABOVE'
+	ALERT_BELOW = 'ALERT_BELOW'
 
 open_trades = None
 config = None
@@ -73,12 +75,7 @@ def start_handler(bot, update, args):
 	bot.send_message(chat_id=update.message.chat_id, text="ack!")
 
 def build_status_msg(open_trades, prices, balances, use_repr=False):
-	text = ['Status:']
-	for trade in open_trades.itervalues():
-		if not isinstance(trade, dict):
-			continue
-		pos_str = repr(trade) if use_repr else str(trade)
-		text.append(pos_str)
+	text = ['Status:', format_trades(open_trades.itervalues(), use_repr)]
 	text.append('\nPrices:\n%s' % format_prices(prices))
 	text.append('\nBalances:\n%s' % format_balances(balances))
 
@@ -147,9 +144,28 @@ def create_trade(config, args):
 		'threshold': float(args[4]),
 	}
 
+
 	config['next_id'] = next_id + 1
 	config.sync()
 	return trade
+
+def format_trades(trades, use_repr=False):
+	trades = sorted(trades, key=lambda trade: (trade['pair'][0], trade['pair'][1], trade['threshold']))
+	last_pair = ""
+	lines = []
+	for trade in trades:
+		if use_repr:
+			lines.append(repr(trade))
+			continue
+		pair = "%s/%s" % (trade['pair'][0], trade['pair'][1])
+		if pair != last_pair:
+			last_pair = pair
+			lines.append("%s:" % pair)
+		if trade['type'] == TRADE_TYPE.ALERT_BELOW or trade['type'] == TRADE_TYPE.ALERT_ABOVE:
+			lines.append("%f %s (id=%d)" % (trade['threshold'], trade['type'], trade['id']))
+		else:
+			lines.append("%f %s %s (id=%d)" % (trade['threshold'], trade['type'], trade['quantity'], trade['id']))
+	return '\n'.join(lines)
 
 def create_alert(config, args):
 	next_id = config['next_id'] if 'next_id' in config else 0
@@ -157,9 +173,7 @@ def create_alert(config, args):
 	trade = {
 		'id': next_id,
 		'pair': [str(args[0]).upper(), str(args[1]).upper()],
-		'price': float(args[2]),
-		'type': TRADE_TYPE.ALERT,
-
+		'threshold': float(args[2]),
 	}
 
 	config['next_id'] = next_id + 1
@@ -190,11 +204,10 @@ def alert_handler(bot, update, args):
 	prices = get_prices(client)
 	current_price = prices[''.join(trade['pair'])]
 
-	if trade['price'] > current_price:
-		trade['pmin'] = trade['price']
+	if trade['threshold'] > current_price:
+		trade['type'] = TRADE_TYPE.ALERT_ABOVE
 	else:
-		trade['pmax'] = trade['price']
-	del trade['price']
+		trade['type'] = TRADE_TYPE.ALERT_BELOW
 
 
 	open_trades[str(trade['id'])] = trade
@@ -208,8 +221,9 @@ def help_handler(bot, update):
 	logging.debug("Responding to /help.")
 	bot.send_message(chat_id=update.message.chat_id, text="""/start <API_KEY> <SECRET>
 /trade <COIN> <MARKET> <QUANTITY> <TYPE> [PRICE?]
-/trade LTC BTC 1 BUY_STOP_MARKET 0.22
-/trade LTC BTC 1 SELL_STOP_MARKET 0.24
+/trade LTC BTC 1 BUY_BELOW_AT_MARKET 0.22 # Buy Zone
+/trade LTC BTC 1 SELL_ABOVE_AT_MARKET 0.24 # Profit
+/trade LTC BTC 1 SELL_BELOW_AT_MARKET 0.2 # Stop loss
 /price LTC BTC
 /alert LTC BTC 0.23
 /status - get current status of open trades.
@@ -300,7 +314,8 @@ def get_prices(client, open_trades=None):
 def get_balances(open_trades, client):
 	account_info = client.get_account()
 	balances = {x['asset']: {'free': float(x['free']), 'locked': float(x['locked'])} for x in account_info['balances']}
-	relevant_keys = set([x['pair'][0] for x in open_trades.itervalues() if isinstance(x, dict)])
+	relevant_keys = [x['pair'] for x in open_trades.itervalues() if isinstance(x, dict)]
+	relevant_keys = set([symbol for pair in relevant_keys for symbol in pair])
 	balances = {x:y for x,y in balances.iteritems() if x in relevant_keys}
 	return balances
 
@@ -358,27 +373,26 @@ class LoopRunner(threading.Thread):
 					continue
 				current_price = prices[''.join(trade['pair'])]
 				recent_price = get_recent_price(trade['pair'], server_time, client) or current_price
-				if trade['type'] == TRADE_TYPE.ALERT:
-					if 'pmin' in trade:
-						if current_price > trade['pmin']:
-							notify_user('Alert %s is at %s.' % ('/'.join(trade['pair']), current_price))
+				if trade['type'] == TRADE_TYPE.ALERT_ABOVE:
+						if current_price > trade['threshold']:
+							notify_user('Alert %s is above %s at %s.' % ('/'.join(trade['pair']), trade['threshold'], current_price))
 							deletes.append(key)
-					elif 'pmax' in trade:
-						if current_price < trade['pmax']:
-							notify_user('Alert %s is at %s.' % ('/'.join(trade['pair']), current_price))
+				elif trade['type'] == TRADE_TYPE.ALERT_BELOW:
+						if current_price < trade['threshold']:
+							notify_user('Alert %s is below %s at %s.' % ('/'.join(trade['pair']), trade['threshold'], current_price))
 							deletes.append(key)
-					else:
-						notify_user("Urecognized alert: %s" % trade)
-
-				elif trade['type'] == TRADE_TYPE.BUY_STOP_MARKET:
+				elif trade['type'] == TRADE_TYPE.BUY_BELOW_AT_MARKET:
 					if recent_price < trade['threshold']:
-						notify_user('Buying %s of %s at %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price))
+						notify_user('Buying %s of %s at %s, price is below %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price, trade['threshold']))
 						deletes.append(key)
-				elif trade['type'] == TRADE_TYPE.SELL_STOP_MARKET:
+				elif trade['type'] == TRADE_TYPE.SELL_ABOVE_AT_MARKET:
 					if recent_price > trade['threshold']:
-						notify_user('Selling %s of %s at %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price))
+						notify_user('Selling %s of %s at %s, price is above %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price, trade['threshold']))
 						deletes.append(key)
-
+				elif trade['type'] == TRADE_TYPE.SELL_BELOW_AT_MARKET:
+					if recent_price < trade['threshold']:
+						notify_user('Selling %s of %s at %s, price is below %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price, trade['threshold']))
+						deletes.append(key)
 				else:
 					notify_user("Urecognized trade type: %s" % trade['type'])
 
