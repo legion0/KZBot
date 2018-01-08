@@ -16,7 +16,7 @@ import telegram
 from telegram.ext import Updater
 from telegram.ext import MessageHandler, Filters
 from telegram.ext import CommandHandler
-from telegram.error import (TelegramError, Unauthorized, BadRequest, 
+from telegram.error import (TelegramError, Unauthorized, BadRequest,
 														TimedOut, ChatMigrated, NetworkError)
 
 from binance.client import Client
@@ -27,6 +27,16 @@ kMaxRunInterval = 60
 
 glb_lock = threading.Lock()
 
+
+def bot_msg_exception(func):
+	@wraps(func)
+	def wrapped(bot, update, *args, **kwargs):
+		try:
+			return func(bot, update, *args, **kwargs)
+		except Exception as e:
+			error_str = 'Got %s: %s at:\n%s' % (type(e), e, traceback.format_exc())
+			bot.send_message(chat_id=update.message.chat_id, text=error_str)
+	return wrapped
 
 def requires_lock(func):
 	@wraps(func)
@@ -59,6 +69,7 @@ def init_client(config):
 	return client
 
 @requires_lock
+@bot_msg_exception
 def start_handler(bot, update, args):
 	global config
 	logging.debug("Responding to /start: %s" % args)
@@ -82,14 +93,19 @@ def build_status_msg(open_trades, prices, balances, use_repr=False):
 	return '\n'.join(text)
 
 @requires_lock
+@bot_msg_exception
 def status_handler(bot, update, args):
 	global open_trades, config
 	logging.debug("Responding to /status: %s." % args)
-	client = init_client(config)
+	client = BinanceClient(config)
 	use_repr = (len(args) and args[0] == 'repr')
-	text = build_status_msg(open_trades, get_prices(client, open_trades), get_balances(open_trades, client), use_repr=use_repr)
+
+	balances = client.get_balances(get_flat_symbols(open_trades))
+	prices = client.get_prices([trade['pair'] for trade in open_trades.itervalues()])
+	text = build_status_msg(open_trades, prices, balances, use_repr=use_repr)
 	bot.send_message(chat_id=update.message.chat_id, text=text)
 
+@bot_msg_exception
 def ping_handler(bot, update):
 	global loop_runner
 	logging.debug("Responding to /ping.")
@@ -105,6 +121,7 @@ def ping_handler(bot, update):
 	bot.send_message(chat_id=update.message.chat_id, text=text)
 
 @requires_lock
+@bot_msg_exception
 def remove_handler(bot, update, args):
 	global open_trades
 	logging.debug("Responding to /remove: args=%r." % args)
@@ -121,31 +138,96 @@ def remove_handler(bot, update, args):
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n\n'.join(text))
 
+@bot_msg_exception
 def price_handler(bot, update, args):
 	logging.debug("Responding to /price: args=%r." % args)
-	text = ""
-
-	try:
-		client = init_client(config)
-		price = get_price(args[0], args[1], client)
-		text =  format_scientific(price)
-	except Exception as e:
-		text = 'Got %s: %s at:\n%s' % (type(e), e, traceback.format_exc())
-
+	client = BinanceClient(config)
+	price = get_price(args[0], args[1], client)
+	text =	format_scientific(price)
 	bot.send_message(chat_id=update.message.chat_id, text=text)
 
-def create_trades(config, args):
+class BinanceClient(object):
+	def __init__(self, config):
+		self._c = Client(config['api_key'], config['secret'])
+
+	def get_symbol_info(self, pair):
+		info = self._c.get_symbol_info(''.join(pair))
+		info['filters'] = {x['filterType']: x for x in info['filters']}
+		return info
+
+	def get_balances(self, symbols):
+		"""
+		symbols: set of symbols to get balances for, e.g. {'BTC', 'LTC'}.
+		"""
+		account_info = self._c.get_account()
+		return {x['asset']: {'free': float(x['free']), 'locked': float(x['locked'])} for x in account_info['balances'] if x['asset'] in symbols}
+
+	def get_prices(self, pairs):
+		"""
+		pairs: list of pairs to get balances for, e.g. (('LTC', 'BTC'), ('BTC', 'USDT')).
+		"""
+		pairs = set([pair[0] + pair[1] for pair in pairs])
+		return {x['symbol']: float(x['price']) for x in self._c.get_all_tickers() if x['symbol'] in pairs}
+
+	def get_server_time(self):
+		return self._c.get_server_time()['serverTime']
+
+	def get_recent_price(self, pair, server_time, window):
+		symbol = pair[0] + pair[1]
+		start_time = server_time - window * 1000
+		end_time = server_time
+		trades = self._c.get_aggregate_trades(symbol=symbol, startTime=start_time, endTime=end_time)
+		if len(trades) == 0:
+	#		logging.debug('No trades for %s', pair)
+			return None
+		recent_price = max([float(trade['p']) for trade in trades])
+	#	logging.debug('Recent price for %s is %s', pair, recent_price)
+		return recent_price
+
+	def create_test_order(self, pair, side, type, quantity):
+		return self._c.create_test_order(
+			symbol=pair[0] + pair[1],
+			side=side,
+			type=type,
+			quantity=quantity)
+
+	@staticmethod
+	def get_min_lot_size(symbol_info):
+		return float(symbol_info['filters']['LOT_SIZE']['minQty'])
+	@staticmethod
+	def get_max_lot_size(symbol_info):
+		return float(symbol_info['filters']['LOT_SIZE']['maxQty'])
+	@staticmethod
+	def get_lot_size_step(symbol_info):
+		return float(symbol_info['filters']['LOT_SIZE']['stepSize'])
+	@staticmethod
+	def get_max_price(symbol_info):
+		return float(symbol_info['filters']['PRICE_FILTER']['maxPrice'])
+	@staticmethod
+	def get_min_price(symbol_info):
+		return float(symbol_info['filters']['PRICE_FILTER']['minPrice'])
+	@staticmethod
+	def get_price_step(symbol_info):
+		return float(symbol_info['filters']['PRICE_FILTER']['tickSize'])
+
+def create_trades(config, client, args):
 	pair = (str(args[0]).upper(), str(args[1]).upper())
+
 	trades = []
 	for i in xrange(2, len(args), 3):
 		next_id = config['next_id'] if 'next_id' in config else 0
 		trade = {
 			'id': next_id,
-			'pair': list(pair),
+			'pair': pair,
 			'quantity': float(args[i]),
 			'type': str(args[i+1]).upper(),
 			'threshold': float(args[i+2]),
 		}
+		order = client.create_test_order(
+			pair=pair,
+			side=Client.SIDE_BUY,
+			type=Client.ORDER_TYPE_MARKET,
+			quantity=trade['quantity'])
 		trades.append(trade)
 		config['next_id'] = next_id + 1
 	config.sync()
@@ -165,11 +247,13 @@ def create_alert(config, args):
 	return trade
 
 @requires_lock
+@bot_msg_exception
 def trade_handler(bot, update, args):
 	global open_trades, config
 	logging.debug("Responding to /trade: args=%r." % args)
+	client = BinanceClient(config)
 
-	trades = create_trades(config, args)
+	trades = create_trades(config, client, args)
 	for trade in trades:
 		open_trades[str(trade['id'])] = trade
 	open_trades.sync()
@@ -179,15 +263,16 @@ def trade_handler(bot, update, args):
 	bot.send_message(chat_id=update.message.chat_id, text='\n'.join(text))
 
 @requires_lock
+@bot_msg_exception
 def alert_handler(bot, update, args):
 	global open_trades, config
 	logging.debug("Responding to /alert: args=%r." % args)
 
 	trade = create_alert(config, args)
 
-	client = init_client(config)
-	prices = get_prices(client)
-	current_price = prices[''.join(trade['pair'])]
+	client = BinanceClient(config)
+	prices = client.get_prices((trade['pair'],))
+	current_price = prices[trade['pair'][0] + trade['pair'][1]]
 
 	if trade['threshold'] > current_price:
 		trade['type'] = TRADE_TYPE.ALERT_ABOVE
@@ -202,13 +287,14 @@ def alert_handler(bot, update, args):
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n'.join(text))
 
+@bot_msg_exception
 def help_handler(bot, update):
 	logging.debug("Responding to /help.")
 	bot.send_message(chat_id=update.message.chat_id, text="""/start <API_KEY> <SECRET>
-/trade <COIN> <MARKET> <QUANTITY> <TYPE> [PRICE?]
+/trade <COIN> <MARKET> <QUANTITY> <TYPE> <THRESHOLD>
 /trade LTC BTC 1 BUY_BELOW_AT_MARKET 0.22 # Buy Zone
-/trade LTC BTC 1 SELL_ABOVE_AT_MARKET 0.24 # Profit
-/trade LTC BTC 1 SELL_BELOW_AT_MARKET 0.2 # Stop loss
+1 SELL_ABOVE_AT_MARKET 0.24 # Profit
+1 SELL_BELOW_AT_MARKET 0.2 # Stop loss
 /price LTC BTC
 /alert LTC BTC 0.23
 /status - get current status of open trades.
@@ -289,21 +375,6 @@ def notify_user(text, when=0):
 	global updater
 	updater.job_queue.run_once(notify_user_callback, when, {'chat_id': config['chat_id'], 'text': text})
 
-def get_prices(client, open_trades=None):
-	prices = {x['symbol']: float(x['price']) for x in client.get_all_tickers()}
-	if open_trades:
-		relevant_keys = set([("%s%s" % (trade['pair'][0], trade['pair'][1])) for trade in open_trades.itervalues() if isinstance(trade, dict)])
-		prices = {x:y for x,y in prices.iteritems() if x in relevant_keys}
-	return prices
-
-def get_balances(open_trades, client):
-	account_info = client.get_account()
-	balances = {x['asset']: {'free': float(x['free']), 'locked': float(x['locked'])} for x in account_info['balances']}
-	relevant_keys = [x['pair'] for x in open_trades.itervalues() if isinstance(x, dict)]
-	relevant_keys = set([symbol for pair in relevant_keys for symbol in pair])
-	balances = {x:y for x,y in balances.iteritems() if x in relevant_keys}
-	return balances
-
 def notify_user_callback(bot, job):
 	context = job.context
 	chat_id = context['chat_id']
@@ -362,6 +433,10 @@ def format_trades(trades, use_repr, prices):
 			lines.append("%s %s %s (id=%d)" % (format_scientific(trade['threshold'], exp), trade['type'], trade['quantity'], trade['id']))
 	return '\n'.join(lines)
 
+def get_flat_symbols(open_trades):
+	pairs = [x['pair'] for x in open_trades.itervalues()]
+	return set([symbol for pair in pairs for symbol in pair])
+
 class LoopRunner(threading.Thread):
 	def __init__(self):
 		threading.Thread.__init__(self)
@@ -372,7 +447,7 @@ class LoopRunner(threading.Thread):
 
 	def run(self):
 		global open_trades, config
-		client = init_client(config)
+		client = BinanceClient(config)
 		sleep_time = kRunInterval
 		while not self.shutdown_event.is_set():
 			logging.debug('loop')
@@ -402,37 +477,64 @@ class LoopRunner(threading.Thread):
 	def _run_loop(self, open_trades, client):
 		with glb_lock:
 			self.last_run = datetime.datetime.now()
-			balances = get_balances(open_trades, client)
-			prices = get_prices(client, open_trades)
-			server_time = client.get_server_time()['serverTime']
+			balances = client.get_balances(get_flat_symbols(open_trades))
+			prices = client.get_prices([trade['pair'] for trade in open_trades.itervalues()])
+			server_time = client.get_server_time()
 
 			deletes = []
 			for key, trade in open_trades.iteritems():
 				if not isinstance(trade, dict):
 					continue
-				current_price = prices[''.join(trade['pair'])]
-				recent_price = get_recent_price(trade['pair'], server_time, client) or current_price
-#				balance = balances[trade['pair'][0]]
-#				viable_q = min(balance, trade['quantity'])
+				pair_str = ''.join(trade['pair'])
+				current_price = prices[pair_str]
+				recent_price = client.get_recent_price(trade['pair'], server_time, 2 * kRunInterval) or current_price
+				exp = find_exp(recent_price)
+				balance = balances[trade['pair'][0]]
+				symbol_info = client.get_symbol_info(trade['pair'])
+				min_q = client.get_min_lot_size(symbol_info)
+				viable_q = min(min_q, trade['quantity'])
+				#viable_q = min(balance['free'], trade['quantity'])
 				if trade['type'] == TRADE_TYPE.ALERT_ABOVE:
 						if current_price > trade['threshold']:
-							notify_user('Alert %s is above %s at %s.' % ('/'.join(trade['pair']), trade['threshold'], current_price))
+							notify_user('Alert %s is above %s at %s.' % (pair_str, trade['threshold'], format_scientific(trade['threshold'], exp)))
 							deletes.append(key)
 				elif trade['type'] == TRADE_TYPE.ALERT_BELOW:
 						if current_price < trade['threshold']:
-							notify_user('Alert %s is below %s at %s.' % ('/'.join(trade['pair']), trade['threshold'], current_price))
+							notify_user('Alert %s is below %s at %s.' % (pair_str, trade['threshold'], format_scientific(trade['threshold'], exp)))
 							deletes.append(key)
 				elif trade['type'] == TRADE_TYPE.BUY_BELOW_AT_MARKET:
 					if recent_price < trade['threshold']:
-						notify_user('Buying %s of %s at %s, price is below %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price, trade['threshold']))
+#order = client.order_market_buy(
+#		symbol='BNBBTC',
+#		quantity=100)
+#
+#order = client.order_market_sell(
+#		symbol='BNBBTC',
+#		quantity=100)
+						order = client.create_test_order(
+							pair=trade['pair'],
+							side=Client.SIDE_BUY,
+							type=Client.ORDER_TYPE_MARKET,
+							quantity=trade['quantity'])
+						notify_user('Buying %s of %s at %s, price is below %s.' % (trade['quantity'], pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 						deletes.append(key)
 				elif trade['type'] == TRADE_TYPE.SELL_ABOVE_AT_MARKET:
-					if recent_price > trade['threshold']:
-						notify_user('Selling %s of %s at %s, price is above %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price, trade['threshold']))
+					if recent_price > trade['threshold'] and viable_q > 0:
+						order = client.create_test_order(
+							pair=trade['pair'],
+							side=Client.SIDE_SELL,
+							type=Client.ORDER_TYPE_MARKET,
+							quantity=viable_q)
+						notify_user('Selling %s of %s at %s, price is above %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 						deletes.append(key)
 				elif trade['type'] == TRADE_TYPE.SELL_BELOW_AT_MARKET:
-					if recent_price < trade['threshold']:
-						notify_user('Selling %s of %s at %s, price is below %s.' % (trade['quantity'], '/'.join(trade['pair']), current_price, trade['threshold']))
+					if recent_price < trade['threshold'] and viable_q > 0:
+						order = client.create_test_order(
+							pair=trade['pair'],
+							side=Client.SIDE_SELL,
+							type=Client.ORDER_TYPE_MARKET,
+							quantity=viable_q)
+						notify_user('Selling %s of %s at %s, price is below %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 						deletes.append(key)
 				else:
 					notify_user("Urecognized trade type: %s" % trade['type'])
@@ -461,19 +563,7 @@ def get_price(fsym, tsym, client):
 	if tsym == 'USD':
 		current_price = cryptocompare_get_price(fsym, tsym, 'Coinbase')
 	else:
-		prices = get_prices(client)
-		current_price = prices["%s%s" % (fsym, tsym)]
+		prices = client.get_prices(((fsym, tsym),))
+		current_price = prices[fsym + tsym]
 	return current_price
-
-def get_recent_price(pair, server_time, client):
-	symbol = ''.join(pair)
-	start_time = server_time - 2 * kRunInterval * 1000
-	end_time = server_time
-	trades = client.get_aggregate_trades(symbol=symbol, startTime=start_time, endTime=end_time)
-	if len(trades) == 0:
-#		logging.debug('No trades for %s', pair)
-		return None
-	recent_price = max([float(trade['p']) for trade in trades])
-#	logging.debug('Recent price for %s is %s', pair, recent_price)
-	return recent_price
 
