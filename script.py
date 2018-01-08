@@ -75,7 +75,7 @@ def start_handler(bot, update, args):
 	bot.send_message(chat_id=update.message.chat_id, text="ack!")
 
 def build_status_msg(open_trades, prices, balances, use_repr=False):
-	text = ['Status:', format_trades(open_trades.itervalues(), use_repr)]
+	text = ['Status:', format_trades(open_trades.itervalues(), use_repr, prices)]
 	text.append('\nPrices:\n%s' % format_prices(prices))
 	text.append('\nBalances:\n%s' % format_balances(balances))
 
@@ -110,13 +110,14 @@ def remove_handler(bot, update, args):
 	logging.debug("Responding to /remove: args=%r." % args)
 	text = []
 
-	key = str(int(args[0]))
+	for arg in args:
+		key = str(int(arg))
 
-	if key in open_trades:
-		text.append('Trade removed: %s' % open_trades[key])
-		del open_trades[key]
-	else:
-		text.append('key %r not found!' % key)
+		if key in open_trades:
+			text.append('Trade removed: %s' % open_trades[key])
+			del open_trades[key]
+		else:
+			text.append('key %r not found!' % key)
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n\n'.join(text))
 
@@ -127,45 +128,28 @@ def price_handler(bot, update, args):
 	try:
 		client = init_client(config)
 		price = get_price(args[0], args[1], client)
-		text = ("%f" % price)
+		text =  format_scientific(price)
 	except Exception as e:
 		text = 'Got %s: %s at:\n%s' % (type(e), e, traceback.format_exc())
 
 	bot.send_message(chat_id=update.message.chat_id, text=text)
 
-def create_trade(config, args):
-	next_id = config['next_id'] if 'next_id' in config else 0
-
-	trade = {
-		'id': next_id,
-		'pair': [str(args[0]).upper(), str(args[1]).upper()],
-		'quantity': float(args[2]),
-		'type': str(args[3]).upper(),
-		'threshold': float(args[4]),
-	}
-
-
-	config['next_id'] = next_id + 1
+def create_trades(config, args):
+	pair = (str(args[0]).upper(), str(args[1]).upper())
+	trades = []
+	for i in xrange(2, len(args), 3):
+		next_id = config['next_id'] if 'next_id' in config else 0
+		trade = {
+			'id': next_id,
+			'pair': list(pair),
+			'quantity': float(args[i]),
+			'type': str(args[i+1]).upper(),
+			'threshold': float(args[i+2]),
+		}
+		trades.append(trade)
+		config['next_id'] = next_id + 1
 	config.sync()
-	return trade
-
-def format_trades(trades, use_repr=False):
-	trades = sorted(trades, key=lambda trade: (trade['pair'][0], trade['pair'][1], trade['threshold']))
-	last_pair = ""
-	lines = []
-	for trade in trades:
-		if use_repr:
-			lines.append(repr(trade))
-			continue
-		pair = "%s/%s" % (trade['pair'][0], trade['pair'][1])
-		if pair != last_pair:
-			last_pair = pair
-			lines.append("%s:" % pair)
-		if trade['type'] == TRADE_TYPE.ALERT_BELOW or trade['type'] == TRADE_TYPE.ALERT_ABOVE:
-			lines.append("%f %s (id=%d)" % (trade['threshold'], trade['type'], trade['id']))
-		else:
-			lines.append("%f %s %s (id=%d)" % (trade['threshold'], trade['type'], trade['quantity'], trade['id']))
-	return '\n'.join(lines)
+	return trades
 
 def create_alert(config, args):
 	next_id = config['next_id'] if 'next_id' in config else 0
@@ -185,11 +169,12 @@ def trade_handler(bot, update, args):
 	global open_trades, config
 	logging.debug("Responding to /trade: args=%r." % args)
 
-	trade = create_trade(config, args)
-	open_trades[str(trade['id'])] = trade
+	trades = create_trades(config, args)
+	for trade in trades:
+		open_trades[str(trade['id'])] = trade
 	open_trades.sync()
 
-	text = [str(trade), '\nack!']
+	text = [str(trades), '\nack!']
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n'.join(text))
 
@@ -325,17 +310,65 @@ def notify_user_callback(bot, job):
 	text = context['text']
 	bot.send_message(chat_id=chat_id, text=text)
 
+
+def find_exp(value):
+	if value >= 1e9:
+		return 9
+	elif value >= 1e6:
+		return 6
+	elif value >= 1e3:
+		return 3
+	elif value >= 1e0:
+		return 0
+	elif value >= 1e-3:
+		return -3
+	elif value >= 1e-6:
+		return -6
+	elif value >= 1e-9:
+		return -9
+	return 0
+
+def format_scientific(value, exp=None):
+	if value == 0:
+		return 0
+	if exp is None:
+		exp = find_exp(value)
+	if exp == 0:
+		return "%.2f" % value
+	return "%.2fe%d" % (value / 10**exp, exp)
+
 def format_prices(prices):
-	return '\n'.join(['%s: %f' % x for x in prices.iteritems()])
+	return '\n'.join(['%s: %s' % (x[0], format_scientific(x[1])) for x in prices.iteritems()])
 
 def format_balances(balances):
-	return '\n'.join(['%s: %f' % (x, y['free'] + y['locked']) for x, y in balances.iteritems()])
+	return '\n'.join(['%s: %s' % (x, format_scientific(y['free'] + y['locked'])) for x, y in balances.iteritems()])
+
+def format_trades(trades, use_repr, prices):
+	trades = sorted(trades, key=lambda trade: (trade['pair'][0], trade['pair'][1], trade['threshold']))
+	last_pair = ""
+	lines = []
+	for trade in trades:
+		if use_repr:
+			lines.append(repr(trade))
+			continue
+		pair = "%s%s" % (trade['pair'][0], trade['pair'][1])
+		if pair != last_pair:
+			last_pair = pair
+			lines.append("%s:" % pair)
+		exp = find_exp(prices[pair])
+		if trade['type'] == TRADE_TYPE.ALERT_BELOW or trade['type'] == TRADE_TYPE.ALERT_ABOVE:
+			lines.append("%s %s (id=%d)" % (format_scientific(trade['threshold'], exp), trade['type'], trade['id']))
+		else:
+			lines.append("%s %s %s (id=%d)" % (format_scientific(trade['threshold'], exp), trade['type'], trade['quantity'], trade['id']))
+	return '\n'.join(lines)
 
 class LoopRunner(threading.Thread):
 	def __init__(self):
 		threading.Thread.__init__(self)
 		self.shutdown_event = threading.Event()
 		self.last_run = None
+		self._last_run_error = False
+
 
 	def run(self):
 		global open_trades, config
@@ -346,19 +379,25 @@ class LoopRunner(threading.Thread):
 			try:
 				self._run_loop(open_trades, client)
 				sleep_time = kRunInterval
+				if self._last_run_error:
+					self._last_run_error = False
+					notify_user("Completed successful run.")
 			except Exception as e:
+				self._last_run_error = True
 				if isinstance(e, BinanceAPIException) and e.code == -1000:
-					msg = e.message
+					error_str = e.message
+				elif isinstance(e, requests.exceptions.ReadTimeout):
+					error_str = e.message
 				else:
-					msg = 'Got %s: %s at:\n%s' % (type(e), e, traceback.format_exc())
-				logging.error(msg)
-				notify_user(msg)
+					error_str = 'Got %s: %s at:\n%s' % (type(e), e, traceback.format_exc())
+				logging.error(error_str)
 				sleep_time *= 2
 				if sleep_time > kMaxRunInterval:
 					sleep_time = kMaxRunInterval
+				error_str += ('\n\nsleep_time: %s' % sleep_time)
+				notify_user(error_str)
 			finally:
 				self.shutdown_event.wait(sleep_time)
-
 
 	def _run_loop(self, open_trades, client):
 		with glb_lock:
@@ -373,6 +412,8 @@ class LoopRunner(threading.Thread):
 					continue
 				current_price = prices[''.join(trade['pair'])]
 				recent_price = get_recent_price(trade['pair'], server_time, client) or current_price
+#				balance = balances[trade['pair'][0]]
+#				viable_q = min(balance, trade['quantity'])
 				if trade['type'] == TRADE_TYPE.ALERT_ABOVE:
 						if current_price > trade['threshold']:
 							notify_user('Alert %s is above %s at %s.' % ('/'.join(trade['pair']), trade['threshold'], current_price))
