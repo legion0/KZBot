@@ -1,0 +1,6 @@
+*.pyc
+/telegram.bot.token
+/data/
+/config.js
+/.pyenv/
+
