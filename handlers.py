@@ -1,14 +1,29 @@
 
-from telegram import CommandHandler
+import dal
+import logging
+
+from telegram.ext import CommandHandler
+from telegram.error import (TelegramError, Unauthorized, BadRequest, TimedOut, ChatMigrated, NetworkError)
 
 from constants import kRunInterval
 from threading_util import requires_lock
 from telegram_util import bot_msg_exception
-from dal import config, trades_db, get_flat_symbols
-from format import build_status_msg, format_scientific
+from dal import config, trades_db, get_flat_symbols, find_trades_by_pair
+from format import build_status_msg, format_scientific, format_trades
 from binance_util import BinanceClient
 from my_worker import get_instance as get_worker
 import cryptocompare_util as cryptocompare
+
+_USAGE = """
+/trade <COIN> <MARKET> <QUANTITY> <TYPE> <THRESHOLD>
+/trade LTC BTC 1 BUY_BELOW_AT_MARKET 0.22 # Buy Zone
+1 SELL_ABOVE_AT_MARKET 0.24 # Profit
+1 SELL_BELOW_AT_MARKET 0.2 # Stop loss
+/price LTC BTC
+/alert LTC BTC 0.23
+/status - get current status of open trades.
+/remove <TRADE_ID>
+"""
 
 @requires_lock
 @bot_msg_exception
@@ -57,13 +72,24 @@ def remove_handler(bot, update, args):
 	text = []
 
 	for arg in args:
-		key = str(int(arg))
+		try:
+			arg = str(int(arg))
+		except ValueError:
+			arg = str(arg).upper()
 
-		if key in trades_db:
+		if arg in trades_db:
+			key = arg
 			text.append('Trade removed: %s' % trades_db[key])
 			del trades_db[key]
-		else:
-			text.append('key %r not found!' % key)
+			continue
+		keys = find_trades_by_pair(arg)
+		if len(keys):
+			for key in keys:
+				text.append('Trade removed: %s' % trades_db[key])
+				del trades_db[key]
+			continue
+		text.append('key %r not found!' % arg)
+
 	trades_db.sync()
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n\n'.join(text))
@@ -72,11 +98,12 @@ def remove_handler(bot, update, args):
 @bot_msg_exception
 def price_handler(bot, update, args):
 	logging.debug("Responding to /price: args=%r." % args)
+	pair = (str(args[0]).upper(), str(args[1]).upper())
+
 	client = BinanceClient(config['api_key'], config['secret'])
-	price = get_price(args[0], args[1], client)
-	prices = client.get_prices((args,))
-	current_price = prices[args[0] + args[1]]
-	text =	format_scientific(price)
+	prices = client.get_prices((pair,))
+	current_price = prices[pair[0] + pair[1]]
+	text =	format_scientific(current_price)
 	bot.send_message(chat_id=update.message.chat_id, text=text)
 
 #def get_price(fsym, tsym, client):
@@ -87,6 +114,64 @@ def price_handler(bot, update, args):
 #		current_price = prices[fsym + tsym]
 #	return current_price
 
+@requires_lock
+@bot_msg_exception
+def trade_handler(bot, update, args):
+	global open_trades, config
+	logging.debug("Responding to /trade: args=%r." % args)
+	client = BinanceClient(config['api_key'], config['secret'])
+
+	trades = create_trades(client, args)
+	dal.save_trades(trades)
+	prices = client.get_prices((trades[0]['pair'],))
+	
+	text = [format_trades(trades, True, prices), '\nack!']
+
+	bot.send_message(chat_id=update.message.chat_id, text='\n'.join(text))
+
+@requires_lock
+@bot_msg_exception
+def alert_handler(bot, update, args):
+	global open_trades, config
+	logging.debug("Responding to /alert: args=%r." % args)
+
+	client = BinanceClient(config['api_key'], config['secret'])
+	alert = create_alert(client, args)
+
+	dal.save_alert(alert)
+
+	text = [str(trade), '\nack!']
+
+	bot.send_message(chat_id=update.message.chat_id, text='\n'.join(text))
+
+@bot_msg_exception
+def help_handler(bot, update):
+	logging.debug("Responding to /help.")
+	bot.send_message(chat_id=update.message.chat_id, text=_USAGE.strip())
+
+def error_callback(bot, update, error):
+		logging.debug("Got error: %s %s", type(error), error)
+		try:
+				raise error
+		except Unauthorized:
+				# remove update.message.chat_id from conversation list
+				pass
+		except BadRequest:
+				# handle malformed requests - read more below!
+				pass
+		except TimedOut:
+				# handle slow connection problems
+				pass
+		except NetworkError:
+				# handle other connection problems
+				pass
+		except ChatMigrated as e:
+				# the chat_id of a group has changed, use e.new_chat_id instead
+				pass
+		except TelegramError:
+				# handle all other telegram related errors
+				pass
+
 def register_handlers(dispatcher):
 	dispatcher.add_handler(CommandHandler('start', start_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('trade', trade_handler, pass_args=True))
@@ -96,4 +181,19 @@ def register_handlers(dispatcher):
 	dispatcher.add_handler(CommandHandler('status', status_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('ping', ping_handler))
 	dispatcher.add_handler(CommandHandler('help', help_handler))
+	dispatcher.add_error_handler(error_callback)
+
+def create_trades(client, args):
+	pair = (str(args[0]).upper(), str(args[1]).upper())
+
+	trades = []
+	for i in xrange(2, len(args), 3):
+		trade = dal.create_trade(client, pair, float(args[i]), str(args[i+1]).upper(), float(args[i+2]))
+		trades.append(trade)
+
+	return trades
+
+def create_alert(client, args):
+	pair = (str(args[0]).upper(), str(args[1]).upper())
+	return dal.create_alert(client, pair, float(args[2]))
 

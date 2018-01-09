@@ -13,7 +13,9 @@ from requests.exceptions import ReadTimeout
 
 import traceback
 
-from format import format_scientific
+from format import format_scientific, find_exp
+
+from constants import TRADE_TYPE
 
 class MyWorker(threading.Thread):
 	def __init__(self, client):
@@ -37,9 +39,9 @@ class MyWorker(threading.Thread):
 			except Exception as e:
 				self._last_run_error = True
 				if isinstance(e, BinanceAPIException) and e.code == -1000:
-					error_str = e.message
+					error_str = str(e.message)
 				elif isinstance(e, ReadTimeout):
-					error_str = e.message
+					error_str = str(e.message)
 				else:
 					error_str = 'Got %s: %s at:\n%s' % (type(e), e, traceback.format_exc())
 				logging.error(error_str)
@@ -62,8 +64,9 @@ class MyWorker(threading.Thread):
 		for key, trade in trades_db.iteritems():
 			if not isinstance(trade, dict):
 				continue
-			pair_str = ''.join(trade['pair'])
-			current_price = prices[pair_str]
+			pair_str = '/'.join(trade['pair'])
+			pair_key = ''.join(trade['pair'])
+			current_price = prices[pair_key]
 			recent_price = self._c.get_recent_price(trade['pair'], server_time, 2 * kRunInterval) or current_price
 			exp = find_exp(recent_price)
 			balance = balances[trade['pair'][0]]
@@ -90,8 +93,8 @@ class MyWorker(threading.Thread):
 #		quantity=100)
 					order = self._c.create_test_order(
 						pair=trade['pair'],
-						side=Client.SIDE_BUY,
-						type=Client.ORDER_TYPE_MARKET,
+						side=BinanceClient.SIDE_BUY,
+						type=BinanceClient.ORDER_TYPE_MARKET,
 						quantity=trade['quantity'])
 					notify_user('Buying %s of %s at %s, price is below %s.' % (trade['quantity'], pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					deletes.append(key)
@@ -99,8 +102,8 @@ class MyWorker(threading.Thread):
 				if recent_price > trade['threshold'] and viable_q > 0:
 					order = self._c.create_test_order(
 						pair=trade['pair'],
-						side=Client.SIDE_SELL,
-						type=Client.ORDER_TYPE_MARKET,
+						side=BinanceClient.SIDE_SELL,
+						type=BinanceClient.ORDER_TYPE_MARKET,
 						quantity=viable_q)
 					notify_user('Selling %s of %s at %s, price is above %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					deletes.append(key)
@@ -108,8 +111,8 @@ class MyWorker(threading.Thread):
 				if recent_price < trade['threshold'] and viable_q > 0:
 					order = self._c.create_test_order(
 						pair=trade['pair'],
-						side=Client.SIDE_SELL,
-						type=Client.ORDER_TYPE_MARKET,
+						side=BinanceClient.SIDE_SELL,
+						type=BinanceClient.ORDER_TYPE_MARKET,
 						quantity=viable_q)
 					notify_user('Selling %s of %s at %s, price is below %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					deletes.append(key)

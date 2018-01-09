@@ -1,12 +1,12 @@
 from binance.client import Client as _Client
 #from binance.exceptions import BinanceAPIException
 
-class BinanceClient(object):
+class BinanceClient(_Client):
 	def __init__(self, api_key, api_secret):
-		self._c = _Client(api_key, api_secret)
+		_Client.__init__(self, api_key, api_secret)
 
 	def get_symbol_info(self, pair):
-		info = self._c.get_symbol_info(''.join(pair))
+		info = _Client.get_symbol_info(self, ''.join(pair))
 		info['filters'] = {x['filterType']: x for x in info['filters']}
 		return info
 
@@ -14,24 +14,27 @@ class BinanceClient(object):
 		"""
 		symbols: set of symbols to get balances for, e.g. {'BTC', 'LTC'}.
 		"""
-		account_info = self._c.get_account()
+		account_info = _Client.get_account(self)
 		return {x['asset']: {'free': float(x['free']), 'locked': float(x['locked'])} for x in account_info['balances'] if x['asset'] in symbols}
 
 	def get_prices(self, pairs):
 		"""
 		pairs: list of pairs to get balances for, e.g. (('LTC', 'BTC'), ('BTC', 'USDT')).
 		"""
-		pairs = set([pair[0] + pair[1] for pair in pairs])
-		return {x['symbol']: float(x['price']) for x in self._c.get_all_tickers() if x['symbol'] in pairs}
+		prices = {x['symbol']: float(x['price']) for x in self.get_all_tickers() if x['symbol']}
+		if pairs:
+			pairs = set([pair[0] + pair[1] for pair in pairs])
+			prices = {x: y for x, y in prices.iteritems() if x in pairs}
+		return prices
 
 	def get_server_time(self):
-		return self._c.get_server_time()['serverTime']
+		return _Client.get_server_time(self)['serverTime']
 
 	def get_recent_price(self, pair, server_time, window):
 		symbol = pair[0] + pair[1]
 		start_time = server_time - window * 1000
 		end_time = server_time
-		trades = self._c.get_aggregate_trades(symbol=symbol, startTime=start_time, endTime=end_time)
+		trades = self.get_aggregate_trades(symbol=symbol, startTime=start_time, endTime=end_time)
 		if len(trades) == 0:
 	#		logging.debug('No trades for %s', pair)
 			return None
@@ -40,7 +43,8 @@ class BinanceClient(object):
 		return recent_price
 
 	def create_test_order(self, pair, side, type, quantity):
-		return self._c.create_test_order(
+		return _Client.create_test_order(
+			self,
 			symbol=pair[0] + pair[1],
 			side=side,
 			type=type,

@@ -1,4 +1,8 @@
 from functools import wraps as wraps
+from dal import config
+from telegram.ext import Updater
+
+import traceback
 
 def bot_msg_exception(func):
 	@wraps(func)
@@ -22,4 +26,14 @@ def get_updater():
 	with open('telegram.bot.token') as f:
 		_glb_updater = Updater(token=f.read().strip())
 	return _glb_updater
+
+def notify_user(text, when=0):
+		get_updater().job_queue.run_once(_notify_user_callback, when, {'chat_id': config['chat_id'], 'text': text})
+
+def _notify_user_callback(bot, job):
+    context = job.context
+    chat_id = context['chat_id']
+    text = context['text']
+    bot.send_message(chat_id=chat_id, text=text)
+
 
