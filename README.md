@@ -27,6 +27,8 @@ If you do not yet have a Binance account please use my referal link: https://www
 If you want to disconnect then detach from tmux with `Ctrl+b d`.
 To reattach use `tmux a`
 
+To monitor the logs run `tail -f log.txt` in a separate tmux pane/window/session/terminal/planet/galaxy.
+
 ## Keys setup
 1. text your bot: `/start <API_KEY> <API_SECRET>` to register your keys.
 
