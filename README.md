@@ -5,7 +5,7 @@ If you do not yet have a Binance account please use my referal link: https://www
 2. Get a telegram bot token from https://telegram.me/botfather and write it down somewhere.
 
 3. ssh into the machine.
-	1. make sure you have all deps installed: `sudo apt-get update && sudo apt-get install git ipython python2.7 virtualenv python-dev`.
+	1. make sure you have all deps installed: `sudo apt-get update && sudo apt-get install git ipython python2.7 virtualenv python-dev tmux`.
 	2. clone this repo.
 
 ## setup python env
@@ -18,10 +18,14 @@ If you do not yet have a Binance account please use my referal link: https://www
 
 ## Running the bot
 1. cd into the project directory.
-2. start the env using the helper scipt with `. pyenv.sh`
-3. open ipython with `ipython`
-4. load the script with `%run script.py`
-5. run the script with `main()`
+2. start tmux with `tmux`.
+3. start the env using the helper scipt with `. pyenv.sh`
+4. open ipython with `ipython`
+5. load the script with `%run script.py`
+6. run the script with `main()`
+
+If you want to disconnect then detach from tmux with `Ctrl+b d`.
+To reattach use `tmux a`
 
 ## Keys setup
 1. text your bot: `/start <API_KEY> <API_SECRET>` to register your keys.
