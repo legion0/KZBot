@@ -17,16 +17,26 @@ from format import format_scientific, find_exp
 
 from constants import TRADE_TYPE
 
-class MyWorker(threading.Thread):
+class MyWorker(object):
 	def __init__(self, client):
-		threading.Thread.__init__(self)
+		self._thread = threading.Thread(target=self._run)
 		self._c = client
 		self.shutdown_event = threading.Event()
 		self.last_run = None
 		self._last_run_error = False
 
+	def start(self):
+		self.last_run = None
+		self._last_run_error = False
+		self.shutdown_event.clear()
+		self._thread = threading.Thread(target=self._run)
+		self._thread.start()
 
-	def run(self):
+	def stop(self):
+		self.shutdown_event.set()
+		self._thread.join()
+
+	def _run(self):
 		sleep_time = kRunInterval
 		while not self.shutdown_event.is_set():
 			logging.debug('loop')

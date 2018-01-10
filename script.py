@@ -15,13 +15,11 @@ def main():
 	logging.info("Up!")
 
 def stop():
-	get_worker().shutdown_event.set()
-	get_worker().join()
-
+	get_worker().stop()
 	get_updater().stop()
 
-	trades_db.close()
-	config.close()
+	trades_db.sync()
+	config.sync()
 	logging.info("Down!")
 
 
