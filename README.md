@@ -32,5 +32,7 @@ If you do not yet have a Binance account please use my referal link: https://www
 
 ## Making money off this ? Please donate me a cup of coffe/beer:
 LTC: LRvSzKF9qi8uSz5K8nqCiKiLaCNmuFNEKo
+
 ETH: 0x1A6B538A2D53212Dd1FDEd06bE746101C746b7B6
+
 BTC: 13RiGBZDhyHKWMfd6CVny1ViykEsyJshau
