@@ -10,7 +10,7 @@ from constants import kRunInterval
 from threading_util import requires_lock
 from telegram_util import bot_msg_exception
 from dal import config, trades_db, get_flat_symbols, find_trades_by_pair
-from format import build_status_msg, format_scientific, format_trades
+from format import build_status_msg, format_scientific, format_trades, find_exp
 from binance_util import BinanceClient
 from my_worker import get_instance as get_worker
 import cryptocompare_util as cryptocompare
@@ -20,7 +20,7 @@ _USAGE = """
 /trade LTC BTC 1 BUY_BELOW_AT_MARKET 0.22 # Buy Zone
 1 SELL_ABOVE_AT_MARKET 0.24 # Profit
 1 SELL_BELOW_AT_MARKET 0.2 # Stop loss
-/price LTC BTC
+/info LTC BTC
 /alert LTC BTC 0.23
 /status - get current status of open trades.
 /remove <TRADE_ID>
@@ -95,16 +95,35 @@ def remove_handler(bot, update, args):
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n\n'.join(text))
 
+_INFO_TEMPLATE = """
+price: %s
+min_q: %s
+q_step: %s
+min_price: %s
+price_step: %s
+""".strip()
+
 @requires_lock
 @bot_msg_exception
-def price_handler(bot, update, args):
-	logging.debug("Responding to /price: args=%r." % args)
+def info_handler(bot, update, args):
+	logging.debug("Responding to /info: args=%r." % args)
 	pair = (str(args[0]).upper(), str(args[1]).upper())
 
 	client = BinanceClient(config['api_key'], config['secret'])
 	prices = client.get_prices((pair,))
 	current_price = prices[pair[0] + pair[1]]
-	text =	format_scientific(current_price)
+
+	symbol_info = client.get_symbol_info(pair)
+	lot_size_step = client.get_lot_size_step(symbol_info)
+	exp = find_exp(current_price)
+	lot_exp = find_exp(lot_size_step)
+	text = _INFO_TEMPLATE % (
+		format_scientific(current_price, exp),
+		format_scientific(client.get_min_lot_size(symbol_info), lot_exp),
+		format_scientific(lot_size_step, lot_exp),
+		format_scientific(client.get_min_price(symbol_info), exp),
+		format_scientific(client.get_price_step(symbol_info), exp),
+	)
 	bot.send_message(chat_id=update.message.chat_id, text=text)
 
 #def get_price(fsym, tsym, client):
@@ -177,7 +196,7 @@ def register_handlers(dispatcher):
 	dispatcher.add_handler(CommandHandler('start', start_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('trade', trade_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('alert', alert_handler, pass_args=True))
-	dispatcher.add_handler(CommandHandler('price', price_handler, pass_args=True))
+	dispatcher.add_handler(CommandHandler('info', info_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('remove', remove_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('status', status_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('ping', ping_handler))
