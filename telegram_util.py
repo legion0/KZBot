@@ -28,7 +28,10 @@ def get_updater():
 	return _glb_updater
 
 def notify_user(text, when=0):
-		get_updater().job_queue.run_once(_notify_user_callback, when, {'chat_id': config['chat_id'], 'text': text})
+		if 'chat_id' in config:
+			get_updater().job_queue.run_once(_notify_user_callback, when, {'chat_id': config['chat_id'], 'text': text})
+		else:
+			logging.error('No chat id in config')
 
 def _notify_user_callback(bot, job):
     context = job.context

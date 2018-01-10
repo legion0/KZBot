@@ -37,6 +37,7 @@ class MyWorker(object):
 		self._thread.join()
 
 	def _run(self):
+		notify_user("Up!")
 		sleep_time = kRunInterval
 		while not self.shutdown_event.is_set():
 			logging.debug('loop')

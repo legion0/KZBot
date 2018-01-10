@@ -29,6 +29,8 @@ To reattach use `tmux a`
 
 To monitor the logs run `tail -f log.txt` in a separate tmux pane/window/session/terminal/planet/galaxy.
 
+To set it to run on reboot add `reboot SHELL=/bin/bash <path to daemon.sh>` to your `crontab -e`
+
 ## Keys setup
 1. text your bot: `/start <API_KEY> <API_SECRET>` to register your keys.
 
