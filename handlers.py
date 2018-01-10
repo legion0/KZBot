@@ -16,6 +16,7 @@ from my_worker import get_instance as get_worker
 import cryptocompare_util as cryptocompare
 
 _USAGE = """
+/start <API_KEY> <API_SECRET>
 /trade <COIN> <MARKET> <QUANTITY> <TYPE> <THRESHOLD>
 /trade LTC BTC 1 BUY_BELOW_AT_MARKET 0.22 # Buy Zone
 1 SELL_ABOVE_AT_MARKET 0.24 # Profit
