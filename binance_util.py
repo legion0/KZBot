@@ -1,5 +1,4 @@
 from binance.client import Client as _Client
-#from binance.exceptions import BinanceAPIException
 
 class BinanceClient(_Client):
 	def __init__(self, api_key, api_secret):
