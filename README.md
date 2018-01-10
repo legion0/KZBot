@@ -5,7 +5,7 @@ If you do not yet have a Binance account please use my referal link: https://www
 2. Get a telegram bot token from https://telegram.me/botfather and write it down somewhere.
 
 3. ssh into the machine.
-	1. make sure you have all deps installed: `sudo apt-get update && sudo apt-get install git ipython python2.7 virtualenv`.
+	1. make sure you have all deps installed: `sudo apt-get update && sudo apt-get install git ipython python2.7 virtualenv python-dev`.
 	2. clone this repo.
 
 ## setup python env
@@ -14,6 +14,7 @@ If you do not yet have a Binance account please use my referal link: https://www
 3. start the env using the helper scipt with `. pyenv.sh`
 4. install the requirments with `pip install -r requirments.txt`
 5. write your token into `telegram.bot.token` with `echo <TOKEN> > telegram.bot.token`
+6. `mkdir data`
 
 ## Running the bot
 1. cd into the project directory.
