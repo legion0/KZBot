@@ -1,3 +1,5 @@
+If you do not yet have a Binance account please use my referal link: https://www.binance.com/?ref=12559326
+
 1. Get a VPS, https://console.cloud.google.com has a free micro instance that is sufficient for running this bot.
 
 2. Get a telegram bot token from https://telegram.me/botfather and write it down somewhere.
@@ -27,3 +29,8 @@
 * Add instructions on how to run the script on boot in case the machine restarts.
 * Do this guide on a fresh machine to make sure i did not forget any steps.
 
+
+## Making money off this ? Please donate me a cup of coffe/beer:
+LTC: LRvSzKF9qi8uSz5K8nqCiKiLaCNmuFNEKo
+ETH: 0x1A6B538A2D53212Dd1FDEd06bE746101C746b7B6
+BTC: 13RiGBZDhyHKWMfd6CVny1ViykEsyJshau
