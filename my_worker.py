@@ -82,8 +82,8 @@ class MyWorker(object):
 			balance = balances[trade['pair'][0]]
 			symbol_info = self._c.get_symbol_info(trade['pair'])
 			min_q = self._c.get_min_lot_size(symbol_info)
-			viable_q = min(min_q, trade['quantity'])
-			#viable_q = min(balance['free'], trade['quantity'])
+			#viable_q = min(min_q, trade['quantity'])
+			viable_q = min(balance['free'], trade['quantity'])
 			if trade['type'] == TRADE_TYPE.ALERT_ABOVE:
 					if current_price > trade['threshold']:
 						notify_user('Alert %s is above %s at %s.' % (pair_str, trade['threshold'], format_scientific(trade['threshold'], exp)))
@@ -94,6 +94,7 @@ class MyWorker(object):
 						deletes.append(key)
 			elif trade['type'] == TRADE_TYPE.BUY_BELOW_AT_MARKET:
 				if recent_price < trade['threshold']:
+					notify_user('Buying %s of %s at %s, price is below %s.' % (trade['quantity'], pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 #order = client.order_market_buy(
 #		symbol='BNBBTC',
 #		quantity=100)
@@ -101,31 +102,33 @@ class MyWorker(object):
 #order = client.order_market_sell(
 #		symbol='BNBBTC',
 #		quantity=100)
-					order = self._c.create_test_order(
+					order = self._c.create_order(
 						pair=trade['pair'],
 						side=BinanceClient.SIDE_BUY,
 						type=BinanceClient.ORDER_TYPE_MARKET,
 						quantity=trade['quantity'])
-					notify_user('Buying %s of %s at %s, price is below %s.' % (trade['quantity'], pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					deletes.append(key)
+					notify_user('done!')
 			elif trade['type'] == TRADE_TYPE.SELL_ABOVE_AT_MARKET:
-				if recent_price > trade['threshold'] and viable_q > 0:
-					order = self._c.create_test_order(
-						pair=trade['pair'],
-						side=BinanceClient.SIDE_SELL,
-						type=BinanceClient.ORDER_TYPE_MARKET,
-						quantity=viable_q)
+				if recent_price > trade['threshold'] and viable_q > min_q:
 					notify_user('Selling %s of %s at %s, price is above %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
-					deletes.append(key)
-			elif trade['type'] == TRADE_TYPE.SELL_BELOW_AT_MARKET:
-				if recent_price < trade['threshold'] and viable_q > 0:
-					order = self._c.create_test_order(
+					order = self._c.create_order(
 						pair=trade['pair'],
 						side=BinanceClient.SIDE_SELL,
 						type=BinanceClient.ORDER_TYPE_MARKET,
 						quantity=viable_q)
-					notify_user('Selling %s of %s at %s, price is below %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					deletes.append(key)
+					notify_user('done!')
+			elif trade['type'] == TRADE_TYPE.SELL_BELOW_AT_MARKET:
+				if recent_price < trade['threshold'] and viable_q > min_q:
+					notify_user('Selling %s of %s at %s, price is below %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
+					order = self._c.create_order(
+						pair=trade['pair'],
+						side=BinanceClient.SIDE_SELL,
+						type=BinanceClient.ORDER_TYPE_MARKET,
+						quantity=viable_q)
+					deletes.append(key)
+					notify_user('done!')
 			else:
 				notify_user("Urecognized trade type: %s" % trade['type'])
 

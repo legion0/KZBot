@@ -54,7 +54,8 @@ def format_trades(trades, use_repr, prices):
 
 def build_status_msg(trades, prices, balances, use_repr=False):
 	text = ['Status:', format_trades(trades.itervalues(), use_repr, prices)]
-	text.append('\nPrices:\n%s' % format_prices(prices))
+	if trades:
+		text.append('\nPrices:\n%s' % format_prices(prices))
 	text.append('\nBalances:\n%s' % format_balances(balances))
 
 	return '\n'.join(text)

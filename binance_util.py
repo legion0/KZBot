@@ -41,6 +41,14 @@ class BinanceClient(_Client):
 	#	logging.debug('Recent price for %s is %s', pair, recent_price)
 		return recent_price
 
+	def create_order(self, pair, side, type, quantity):
+		return _Client.create_order(
+			self,
+			symbol=pair[0] + pair[1],
+			side=side,
+			type=type,
+			quantity=quantity)
+
 	def create_test_order(self, pair, side, type, quantity):
 		return _Client.create_test_order(
 			self,
