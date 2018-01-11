@@ -1,4 +1,6 @@
 from binance.client import Client as _Client
+import math
+from numpy import median
 
 class BinanceClient(_Client):
 	def __init__(self, api_key, api_secret):
@@ -29,7 +31,8 @@ class BinanceClient(_Client):
 	def get_server_time(self):
 		return _Client.get_server_time(self)['serverTime']
 
-	def get_recent_price(self, pair, server_time, window):
+	def get_recent_price(self, pair, server_time, window, do_max=True, filter_threshold=1.0):
+		# TODO: move filtering to util function, not part of binance API
 		symbol = pair[0] + pair[1]
 		start_time = server_time - window * 1000
 		end_time = server_time
@@ -37,7 +40,15 @@ class BinanceClient(_Client):
 		if len(trades) == 0:
 	#		logging.debug('No trades for %s', pair)
 			return None
-		recent_price = max([float(trade['p']) for trade in trades])
+		prices = [float(trade['p']) for trade in trades]
+		# Filter out outliers
+		if filter_threshold < 1.0:
+			prices = filter_prices(prices, filter_threshold)
+		if do_max:
+			recent_price = max(prices)
+		else:
+			recent_price = min(prices)
+
 	#	logging.debug('Recent price for %s is %s', pair, recent_price)
 		return recent_price
 
@@ -75,4 +86,11 @@ class BinanceClient(_Client):
 	@staticmethod
 	def get_price_step(symbol_info):
 		return float(symbol_info['filters']['PRICE_FILTER']['tickSize'])
+
+def filter_prices(prices, threshold):
+	""" Keep threshold percent of the prices based on distance from the median.
+	"""
+	m = median(prices)
+	num_keep = int(math.ceil(threshold * len(prices)))
+	return sorted(prices, key=lambda price: abs(price - m))[:num_keep]
 

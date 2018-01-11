@@ -78,8 +78,9 @@ class MyWorker(object):
 			pair_str = '/'.join(trade['pair'])
 			pair_key = ''.join(trade['pair'])
 			current_price = prices[pair_key]
-			recent_price = self._c.get_recent_price(trade['pair'], server_time, 2 * kRunInterval) or current_price
-			exp = find_exp(recent_price)
+			recent_price_max = self._c.get_recent_price(trade['pair'], server_time, 2 * kRunInterval, filter_threshold=0.8, do_max=True) or current_price
+			recent_price_min = self._c.get_recent_price(trade['pair'], server_time, 2 * kRunInterval, filter_threshold=0.8, do_max=False) or current_price
+			exp = find_exp(recent_price_max)
 			balance = balances[trade['pair'][0]]
 			symbol_info = self._c.get_symbol_info(trade['pair'])
 			min_q = self._c.get_min_lot_size(symbol_info)
@@ -94,7 +95,7 @@ class MyWorker(object):
 						notify_user('Alert %s is below %s at %s.' % (pair_str, trade['threshold'], format_scientific(trade['threshold'], exp)))
 						deletes.append(key)
 			elif trade['type'] == TRADE_TYPE.BUY_BELOW_AT_MARKET:
-				if recent_price < trade['threshold']:
+				if recent_price_max < trade['threshold']:
 					notify_user('Buying %s of %s at %s, price is below %s.' % (trade['quantity'], pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 #order = client.order_market_buy(
 #		symbol='BNBBTC',
@@ -111,7 +112,7 @@ class MyWorker(object):
 					deletes.append(key)
 					notify_user('done!')
 			elif trade['type'] == TRADE_TYPE.SELL_ABOVE_AT_MARKET:
-				if recent_price > trade['threshold'] and viable_q > min_q:
+				if recent_price_min > trade['threshold'] and viable_q > min_q:
 					notify_user('Selling %s of %s at %s, price is above %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					order = self._c.create_order(
 						pair=trade['pair'],
@@ -121,7 +122,7 @@ class MyWorker(object):
 					deletes.append(key)
 					notify_user('done!')
 			elif trade['type'] == TRADE_TYPE.SELL_BELOW_AT_MARKET:
-				if recent_price < trade['threshold'] and viable_q > min_q:
+				if recent_price_max < trade['threshold'] and viable_q > min_q:
 					notify_user('Selling %s of %s at %s, price is below %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					order = self._c.create_order(
 						pair=trade['pair'],
