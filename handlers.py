@@ -60,6 +60,7 @@ def status_handler(bot, update, args):
 
 @requires_lock
 @bot_msg_exception
+@verify_owner
 def ping_handler(bot, update):
 	logging.debug("Responding to /ping.")
 
@@ -132,6 +133,36 @@ def info_handler(bot, update, args):
 	)
 	bot.send_message(chat_id=update.message.chat_id, text=text)
 
+def reverse_price(price):
+	if price is None:
+		return price
+	return 1 / price
+
+@requires_lock
+@bot_msg_exception
+@verify_owner
+def convert_handler(bot, update, args):
+	logging.debug("Responding to /convert: args=%r." % args)
+	quantity = float(args[0])
+	pair = (str(args[1]).upper(), str(args[2]).upper())
+
+	client = BinanceClient(config['api_key'], config['secret'])
+	prices = client.get_prices()
+	current_price = prices.get(pair[0] + pair[1], None) or reverse_price(prices.get(pair[1] + pair[0], None))
+	bridge_price_1 = prices.get(pair[0] + 'BTC', None) or reverse_price(prices.get('BTC' + pair[0], None))
+	bridge_price_2 = prices.get('BTC' + pair[1], None) or reverse_price(prices.get(pair[1] + 'BTC', None))
+
+
+	if current_price is not None:
+		#exp = find_exp(current_price)
+		text = format_scientific(quantity * current_price)
+	elif bridge_price_1 is not None and bridge_price_2 is not None:
+		text = format_scientific(quantity * bridge_price_1 * bridge_price_2)
+	else:
+		text = 'Cannot find price for %s' % (pair,)
+
+	bot.send_message(chat_id=update.message.chat_id, text=text)
+
 #def get_price(fsym, tsym, client):
 #	if tsym == 'USD':
 #		current_price = cryptocompare.get_price(fsym, tsym, 'Coinbase')
@@ -172,7 +203,9 @@ def alert_handler(bot, update, args):
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n'.join(text))
 
+@requires_lock
 @bot_msg_exception
+@verify_owner
 def help_handler(bot, update):
 	logging.debug("Responding to /help.")
 	bot.send_message(chat_id=update.message.chat_id, text=_USAGE.strip())
@@ -205,6 +238,7 @@ def register_handlers(dispatcher):
 	dispatcher.add_handler(CommandHandler('trade', trade_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('alert', alert_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('info', info_handler, pass_args=True))
+	dispatcher.add_handler(CommandHandler('convert', convert_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('remove', remove_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('status', status_handler, pass_args=True))
 	dispatcher.add_handler(CommandHandler('ping', ping_handler))

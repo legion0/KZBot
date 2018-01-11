@@ -18,7 +18,7 @@ class BinanceClient(_Client):
 		account_info = _Client.get_account(self)
 		return {x['asset']: {'free': float(x['free']), 'locked': float(x['locked'])} for x in account_info['balances'] if x['asset'] in symbols}
 
-	def get_prices(self, pairs):
+	def get_prices(self, pairs=None):
 		"""
 		pairs: list of pairs to get balances for, e.g. (('LTC', 'BTC'), ('BTC', 'USDT')).
 		"""
