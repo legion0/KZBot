@@ -8,7 +8,7 @@ from telegram.error import (TelegramError, Unauthorized, BadRequest, TimedOut, C
 
 from constants import kRunInterval
 from threading_util import requires_lock
-from telegram_util import bot_msg_exception
+from telegram_util import bot_msg_exception, verify_owner
 from dal import config, trades_db, get_flat_symbols, find_trades_by_pair
 from format import build_status_msg, format_scientific, format_trades, find_exp
 from binance_util import BinanceClient
@@ -29,6 +29,7 @@ _USAGE = """
 
 @requires_lock
 @bot_msg_exception
+@verify_owner
 def start_handler(bot, update, args):
 	logging.debug("Responding to /start: %s" % args)
 	if len(args) != 2:
@@ -37,6 +38,7 @@ def start_handler(bot, update, args):
 		return
 
 	config['chat_id'] = update.message.chat_id
+	config['owner_id'] = update.message.from_user.id
 	config['api_key'] = str(args[0])
 	config['secret'] = str(args[1])
 	config.sync()
@@ -45,6 +47,7 @@ def start_handler(bot, update, args):
 
 @requires_lock
 @bot_msg_exception
+@verify_owner
 def status_handler(bot, update, args):
 	logging.debug("Responding to /status: %s." % args)
 	client = BinanceClient(config['api_key'], config['secret'])
@@ -69,6 +72,7 @@ def ping_handler(bot, update):
 
 @requires_lock
 @bot_msg_exception
+@verify_owner
 def remove_handler(bot, update, args):
 	logging.debug("Responding to /remove: args=%r." % args)
 	text = []
@@ -106,6 +110,7 @@ price_step: %s
 
 @requires_lock
 @bot_msg_exception
+@verify_owner
 def info_handler(bot, update, args):
 	logging.debug("Responding to /info: args=%r." % args)
 	pair = (str(args[0]).upper(), str(args[1]).upper())
@@ -137,6 +142,7 @@ def info_handler(bot, update, args):
 
 @requires_lock
 @bot_msg_exception
+@verify_owner
 def trade_handler(bot, update, args):
 	global open_trades, config
 	logging.debug("Responding to /trade: args=%r." % args)
@@ -152,6 +158,7 @@ def trade_handler(bot, update, args):
 
 @requires_lock
 @bot_msg_exception
+@verify_owner
 def alert_handler(bot, update, args):
 	global open_trades, config
 	logging.debug("Responding to /alert: args=%r." % args)

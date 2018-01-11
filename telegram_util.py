@@ -14,6 +14,16 @@ def bot_msg_exception(func):
 			bot.send_message(chat_id=update.message.chat_id, text=error_str)
 	return wrapped
 
+def verify_owner(func):
+	@wraps(func)
+	def wrapped(bot, update, *args, **kwargs):
+		if update.message.from_user.id == config.get('owner_id', update.message.from_user.id):
+			return func(bot, update, *args, **kwargs)
+		else:
+			error_str = 'Not authorized !'
+			bot.send_message(chat_id=update.message.chat_id, text=error_str)
+	return wrapped
+
 def notify_user(text, when=0):
 	get_updater().job_queue.run_once(notify_user_callback, when, {'chat_id': config['chat_id'], 'text': text})
 
