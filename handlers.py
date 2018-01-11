@@ -145,7 +145,7 @@ def trade_handler(bot, update, args):
 	trades = create_trades(client, args)
 	dal.save_trades(trades)
 	prices = client.get_prices((trades[0]['pair'],))
-	
+
 	text = [format_trades(trades, True, prices), '\nack!']
 
 	bot.send_message(chat_id=update.message.chat_id, text='\n'.join(text))

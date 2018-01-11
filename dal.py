@@ -31,7 +31,7 @@ def save_trades(trades):
 	for trade in trades:
 		next_id = config['next_id'] if 'next_id' in config else 0
 		trade['id'] = next_id
-		
+
 		trades_db[str(next_id)] = trade
 		config['next_id'] = next_id + 1
 
