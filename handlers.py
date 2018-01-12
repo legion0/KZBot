@@ -21,6 +21,7 @@ _USAGE = """
 /trade LTC BTC 1 BUY_BELOW_AT_MARKET 0.22 # Buy Zone
 1 SELL_ABOVE_AT_MARKET 0.24 # Profit
 1 SELL_BELOW_AT_MARKET 0.2 # Stop loss
+1 TRAILING_STOP_LOSS 0.1 # 10% trailing stop loss
 /info LTC BTC
 /alert LTC BTC 0.23
 /status - get current status of open trades.

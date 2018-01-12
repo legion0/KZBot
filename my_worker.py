@@ -72,6 +72,7 @@ class MyWorker(object):
 		server_time = self._c.get_server_time()
 
 		deletes = []
+		updates = {}
 		for key, trade in trades_db.iteritems():
 			if not isinstance(trade, dict):
 				continue
@@ -84,8 +85,18 @@ class MyWorker(object):
 			balance = balances[trade['pair'][0]]
 			symbol_info = self._c.get_symbol_info(trade['pair'])
 			min_q = self._c.get_min_lot_size(symbol_info)
+			price_step = self._c.get_price_step(symbol_info)
 			#viable_q = min(min_q, trade['quantity'])
 			viable_q = min(balance['free'], trade['quantity'])
+
+			# Update trails
+			if trade['type'] == TRADE_TYPE.TRAILING_STOP_LOSS:
+				new_threshold = max(trade['threshold'], (1 - trade['delta']) * recent_price_max)
+				if new_threshold - trade['threshold'] > price_step:
+					notify_user('Updating threshold for %s from %s to %s.' % (pair_str, format_scientific(trade['threshold'], exp), format_scientific(new_threshold, exp)))
+					trade['threshold'] = new_threshold
+					updates[key] = trade
+
 			if trade['type'] == TRADE_TYPE.ALERT_ABOVE:
 					if current_price > trade['threshold']:
 						notify_user('Alert %s is above %s at %s.' % (pair_str, trade['threshold'], format_scientific(trade['threshold'], exp)))
@@ -112,7 +123,7 @@ class MyWorker(object):
 					deletes.append(key)
 					notify_user('done!')
 			elif trade['type'] == TRADE_TYPE.SELL_ABOVE_AT_MARKET:
-				if recent_price_min > trade['threshold'] and viable_q > min_q:
+				if recent_price_min > trade['threshold'] and viable_q >= min_q:
 					notify_user('Selling %s of %s at %s, price is above %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					order = self._c.create_order(
 						pair=trade['pair'],
@@ -121,8 +132,8 @@ class MyWorker(object):
 						quantity=viable_q)
 					deletes.append(key)
 					notify_user('done!')
-			elif trade['type'] == TRADE_TYPE.SELL_BELOW_AT_MARKET:
-				if recent_price_max < trade['threshold'] and viable_q > min_q:
+			elif trade['type'] in (TRADE_TYPE.SELL_BELOW_AT_MARKET, TRADE_TYPE.TRAILING_STOP_LOSS):
+				if recent_price_max < trade['threshold'] and viable_q >= min_q:
 					notify_user('Selling %s of %s at %s, price is below %s.' % (viable_q, pair_str, format_scientific(current_price, exp), format_scientific(trade['threshold'], exp)))
 					order = self._c.create_order(
 						pair=trade['pair'],
@@ -134,6 +145,7 @@ class MyWorker(object):
 			else:
 				notify_user("Urecognized trade type: %s" % trade['type'])
 
+		trades_db.update(updates)
 		for key in deletes:
 			del trades_db[key]
 		trades_db.sync()

@@ -1,6 +1,7 @@
 
 import shelve as _shelve
 from binance_util import BinanceClient
+from constants import TRADE_TYPE
 #from binance.exceptions import BinanceAPIException
 
 
@@ -14,18 +15,27 @@ def get_flat_symbols(trades_db):
 
 def create_trade(client, pair, quantity, type, threshold):
 	# Create test order to make sure it passes sanity checks
+
+	if type not in TRADE_TYPE.ALL:
+		raise Exception('Invalid type: %s' % type)
 	client.create_test_order(
 		pair=pair,
 		side=BinanceClient.SIDE_BUY,
 		type=BinanceClient.ORDER_TYPE_MARKET,
 		quantity=quantity)
 
-	return {
+	trade = {
 		'pair': pair,
 		'quantity': quantity,
 		'type': type,
 		'threshold': threshold,
 	}
+
+	if type == TRADE_TYPE.TRAILING_STOP_LOSS:
+		trade['delta'] = threshold
+		trade['threshold'] = client.get_prices((pair,))[pair[0] + pair[1]] * (1 - threshold)
+
+	return trade
 
 def save_trades(trades):
 	for trade in trades:
